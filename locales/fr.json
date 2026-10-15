@@ -8,7 +8,9 @@
         "backdoors_not_open": "Les portes arrière ne sont pas ouvertes",
         "get_out_vehicle": "Vous devez sortir du véhicule",
         "too_far_from_trunk": "Vous devez prendre les boites dans le coffre du véhicule",
-        "too_far_from_delivery": "Vous être trop loin du point de livraison"
+        "too_far_from_delivery": "Vous être trop loin du point de livraison",
+        "no_rental": "Vous n'avez pas de camionnette à rendre",
+        "vehicle_too_far": "Ramenez d'abord la camionnette au dépôt"
     },
     "success": {
         "paid_with_cash": "$%s Depôt payé avec l\"argent",
@@ -35,5 +37,10 @@
         "store_vehicle": "[E] - Ranger le véhicule",
         "vehicles": "[E] - Véhicules",
         "deliver_to_store": "Livrer la boîte au magasin"
+    },
+    "target": {
+        "rent": "Louer une camionnette de livraison",
+        "return_vehicle": "Rendre la camionnette",
+        "paycheck": "Récupérer la paie"
     }
 }

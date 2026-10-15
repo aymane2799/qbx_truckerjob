@@ -9,7 +9,9 @@
         "get_out_vehicle": "You need to step out of the vehicle to perform this action",
         "too_far_from_trunk": "You need to grab the boxes from the trunk of your vehicle",
         "too_far_from_delivery": "You need to be closer to the delivery point",
-        "too_many_rents": "You recently rented a car, come back in a few minutes"
+        "too_many_rents": "You recently rented a car, come back in a few minutes",
+        "no_rental": "You have no van to return",
+        "vehicle_too_far": "Bring the van back to the depot first"
     },
     "success": {
         "paid_with_cash": "$%s deposit paid with cash",
@@ -36,5 +38,10 @@
         "store_vehicle": "[E] - Store the Vehicle",
         "vehicles": "[E] - Vehicles",
         "deliver_to_store": "Deliver the box to the store"
+    },
+    "target": {
+        "rent": "Rent a delivery van",
+        "return_vehicle": "Return the van",
+        "paycheck": "Collect the paycheck"
     }
 }

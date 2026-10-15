@@ -4,8 +4,8 @@ local currentZones = {}
 local currentLocation = {}
 local currentBlip = 0
 local hasBox = false
-local truckVehBlip = 0
 local truckerBlip = 0
+local depotPed
 local returningToStation = false
 local currentPlate
 local boxObject
@@ -43,7 +43,7 @@ end
 
 -- Functions
 local function returnToStation()
-    SetBlipRoute(truckVehBlip, true)
+    SetBlipRoute(truckerBlip, true)
     returningToStation = true
 end
 
@@ -53,11 +53,6 @@ end
 
 local function removeElements()
     ClearAllBlipRoutes()
-    if DoesBlipExist(truckVehBlip) then
-        RemoveBlip(truckVehBlip)
-        truckVehBlip = 0
-    end
-
     if DoesBlipExist(truckerBlip) then
         RemoveBlip(truckerBlip)
         truckerBlip = 0
@@ -73,6 +68,7 @@ local function removeElements()
     end
 
     currentZones = {}
+    returningToStation = false
 end
 
 local function getPaid()
@@ -86,26 +82,25 @@ local function getPaid()
 end
 
 local function returnVehicle()
-    if cache.seat ~= -1 then
-        return exports.qbx_core:Notify(locale('error.no_driver'), 'error')
-    end
+    if not lib.callback.await('qbx_truckerjob:server:returnVehicle', false) then return end
 
-    if not isTruckerVehicle(cache.vehicle) then
-        return exports.qbx_core:Notify(locale('error.vehicle_not_correct'), 'error')
-    end
-
-    DeleteVehicle(cache.vehicle)
-    TriggerServerEvent('qbx_truckerjob:server:returnVehicle')
+    stopCarryingBox()
 
     if DoesBlipExist(currentBlip) then
         RemoveBlip(currentBlip)
-        ClearAllBlipRoutes()
         currentBlip = 0
     end
 
-    if not returningToStation and not next(currentLocation) then return end
+    if next(currentLocation) and currentLocation.zoneCombo then
+        currentLocation.zoneCombo:remove()
+    end
 
     ClearAllBlipRoutes()
+    currentLocation = {}
+    currentPlate = nil
+
+    if not returningToStation then return end
+
     returningToStation = false
     exports.qbx_core:Notify(locale('mission.job_completed'), 'success')
 end
@@ -129,155 +124,65 @@ local function openMenuGarage()
     lib.showContext('trucker_veh_menu')
 end
 
-local function createMainTarget()
-    local location = sharedConfig.locations.main;
-    currentZones[#currentZones + 1] = exports.ox_target:addBoxZone({
-        coords = location.coords,
-        size = location.size,
-        rotation = location.rotation,
-        debug = debug,
-        options = {
-            {
-                name = location.label,
-                onSelect = function()
-                    getPaid()
-                end,
-                icon = location.icon,
-                label = location.label,
-                distance = 2,
-                canInteract = function()
-                    return QBX.PlayerData.job.name == 'trucker'
-                end
-            }
-        }
+-- Atlas fork: the dispatcher of the depot replaces the two marker zones (paycheck, vehicles). The ped is
+-- local and exists only while the player is near the depot. Only truckers get the options.
+local function removeDepotPed()
+    if not depotPed then return end
+
+    exports.ox_target:removeLocalEntity(depotPed)
+    if DoesEntityExist(depotPed) then DeletePed(depotPed) end
+    depotPed = nil
+end
+
+local function spawnDepotPed()
+    if depotPed then return end
+
+    local data = sharedConfig.locations.ped
+    local model = lib.requestModel(data.model, 10000)
+    depotPed = CreatePed(0, model, data.coords.x, data.coords.y, data.coords.z, data.coords.w, false, false)
+    SetModelAsNoLongerNeeded(model)
+    FreezeEntityPosition(depotPed, true)
+    SetEntityInvincible(depotPed, true)
+    SetBlockingOfNonTemporaryEvents(depotPed, true)
+
+    if data.scenario then
+        TaskStartScenarioInPlace(depotPed, data.scenario, 0, true)
+    end
+
+    exports.ox_target:addLocalEntity(depotPed, {
+        {
+            name = 'trucker_rent',
+            label = locale('target.rent'),
+            icon = 'fa-solid fa-truck',
+            groups = 'trucker',
+            distance = 2.5,
+            onSelect = openMenuGarage,
+        },
+        {
+            name = 'trucker_return',
+            label = locale('target.return_vehicle'),
+            icon = 'fa-solid fa-warehouse',
+            groups = 'trucker',
+            distance = 2.5,
+            onSelect = returnVehicle,
+        },
+        {
+            name = 'trucker_paycheck',
+            label = locale('target.paycheck'),
+            icon = 'fa-solid fa-money-bill',
+            groups = 'trucker',
+            distance = 2.5,
+            onSelect = getPaid,
+        },
     })
 end
 
-local function createMainZone()
-    local location = sharedConfig.locations.main;
-
-    local zone = lib.zones.sphere({
-        coords = location.coords,
-        radius = location.markerRadius,
-        debug = location.debug
-    })
-
-    local innerZone = lib.zones.sphere({
-        coords = location.coords,
-        radius = location.interactionsRadius,
-        debug = location.debug
-    })
-
-    local marker = lib.marker.new({
-        coords = location.coords,
-        type = location.markerType,
-        height = 0.2,
-        width = 0.3
-    })
-
-    function zone:inside()
-        marker:draw()
-    end
-
-    function innerZone:onEnter()
-        if not lib.isTextUIOpen() then
-            lib.showTextUI(locale('info.pickup_paycheck'))
-        end
-    end
-
-    function innerZone:inside()
-        if IsControlJustPressed(0, 38) then
-            getPaid()
-        end
-    end
-
-    function innerZone:onExit()
-        local isOpen, currentText = lib.isTextUIOpen()
-        if isOpen and currentText == locale('info.pickup_paycheck') then
-            lib.hideTextUI()
-        end
-    end
-
-    currentZones[#currentZones + 1] = zone
-    currentZones[#currentZones + 1] = innerZone
-end
-
-local createMain = config.useTarget and createMainTarget or createMainZone
-
-local function createVehicleZone()
-    local location = sharedConfig.locations.vehicle;
-
-    local zone = lib.zones.sphere({
-        coords = location.coords,
-        radius = location.markerRadius,
-        debug = location.debug
-    })
-
-    local innerZone = lib.zones.sphere({
-        coords = location.coords,
-        radius = location.interactionsRadius,
-        debug = location.debug
-    })
-
-    local marker = lib.marker.new({
-        coords = location.coords,
-        type = location.markerType,
-        height = 0.2,
-        width = 0.3
-    })
-
-    local function hideTextUI()
-        local isOpen, currentText = lib.isTextUIOpen()
-        if isOpen and (currentText == locale('info.store_vehicle') or currentText == locale('info.vehicles')) then
-            lib.hideTextUI()
-        end
-    end
-
-    function zone:inside()
-        marker:draw()
-    end
-
-    function innerZone:onEnter()
-        if not lib.isTextUIOpen() then
-            lib.showTextUI(locale(cache.vehicle and 'info.store_vehicle' or 'info.vehicles'))
-        end
-    end
-
-    local isChangeTextAllowed = false
-    function innerZone:inside()
-        ---This section updates the textui when the client uses the garage.
-        if isChangeTextAllowed then
-            local _, currentText = lib.isTextUIOpen()
-            local expectedText = locale(cache.vehicle and 'info.store_vehicle' or 'info.vehicles')
-            if currentText ~= expectedText and not lib.getOpenContextMenu() then
-                isChangeTextAllowed = false
-                CreateThread(function()
-                    Wait(1000)
-                    lib.showTextUI(locale(cache.vehicle and 'info.store_vehicle' or 'info.vehicles'))
-                end)
-            end
-        end
-        ---
-
-        if IsControlJustPressed(0, 38) then
-            if cache.vehicle then
-                returnVehicle()
-            else
-                openMenuGarage()
-            end
-
-            hideTextUI()
-            isChangeTextAllowed = true
-        end
-    end
-
-    function innerZone:onExit()
-        hideTextUI()
-    end
-
-    currentZones[#currentZones + 1] = zone
-    currentZones[#currentZones + 1] = innerZone
-end
+lib.points.new({
+    coords = sharedConfig.locations.ped.coords.xyz,
+    distance = 60.0,
+    onEnter = spawnDepotPed,
+    onExit = removeDepotPed,
+})
 
 local function areBackDoorsOpen(vehicle) -- This is hardcoded for the rumpo currently
     return GetVehicleDoorAngleRatio(vehicle, 5) > 0.0
@@ -295,8 +200,11 @@ local function getInTrunk()
         return exports.qbx_core:Notify(locale('error.vehicle_not_correct'), 'error')
     end
 
+    -- Atlas fork: the rear doors are opened for the driver. Upstream refused with "backdoors not open"
+    -- unless both rear doors had been opened by hand.
     if not areBackDoorsOpen(vehicle) then
-        return exports.qbx_core:Notify(locale('error.backdoors_not_open'), 'error')
+        SetVehicleDoorOpen(vehicle, 2, false, false)
+        SetVehicleDoorOpen(vehicle, 3, false, false)
     end
 
     local pedCoords = GetEntityCoords(cache.ped, true)
@@ -439,11 +347,7 @@ end
 local function createElements()
     if QBX.PlayerData.job.name ~= 'trucker' then return end
 
-    truckVehBlip = createElement(sharedConfig.locations.vehicle, 326)
     truckerBlip = createElement(sharedConfig.locations.main, 479)
-
-    createMain()
-    createVehicleZone()
 end
 
 -- Events
@@ -484,7 +388,9 @@ RegisterNetEvent('QBCore:Client:OnJobUpdate', function()
 end)
 
 AddEventHandler('onResourceStop', function(resource)
-    if resource == cache.resource then stopCarryingBox() end
+    if resource ~= cache.resource then return end
+    stopCarryingBox()
+    removeDepotPed()
 end)
 
 RegisterNetEvent('qbx_truckerjob:client:spawnVehicle', function(veh)

@@ -4,6 +4,12 @@ local sharedConfig = require 'config.shared'
 --- drops is the counter of packages for which payment is due
 local bail, drops, locations, antiAbuse, rentals = {}, {}, {}, {}, {}
 
+-- Atlas fork: every request made at the depot is measured from the dispatcher (config/shared.lua).
+local depot = sharedConfig.locations.ped.coords.xyz
+local depotRange = 6.0
+-- How far from its parking spot the van may stand when it is returned.
+local returnRange = 40.0
+
 ---@alias NotificationPosition 'top' | 'top-right' | 'top-left' | 'bottom' | 'bottom-right' | 'bottom-left' | 'center-right' | 'center-left'
 ---@alias NotificationType 'info' | 'warning' | 'success' | 'error'
 
@@ -39,25 +45,43 @@ local function isNear(source, coords, maxDistance)
     return ped ~= 0 and #(GetEntityCoords(ped) - coords) <= maxDistance
 end
 
-RegisterNetEvent('qbx_truckerjob:server:returnVehicle', function ()
+-- Atlas fork: the van is returned at the dispatcher, on foot. Upstream let the client delete the van and
+-- refunded the deposit wherever the van was. Here the server refuses while the van is away from the depot
+-- and deletes it itself. A van that no longer exists is refunded, as upstream did.
+---@return boolean returned
+lib.callback.register('qbx_truckerjob:server:returnVehicle', function(source)
     local player = getPlayer(source)
 
-    if not player then return end
+    if not player then return false end
 
     local citizenid = player.PlayerData.citizenid
-    if not isNear(source, sharedConfig.locations.vehicle.coords, 8.0) then return end
+    if not isNear(source, depot, depotRange) then return false end
 
-    if bail[citizenid] then
-        player.Functions.AddMoney('cash', bail[citizenid], 'trucker-bail-paid')
-        bail[citizenid] = nil
-        local rental = rentals[citizenid]
-        local vehicle = rental and rental.netId and NetworkGetEntityFromNetworkId(rental.netId)
-        if vehicle and DoesEntityExist(vehicle) then DeleteEntity(vehicle) end
-        rentals[citizenid] = nil
-        locations[source] = nil
-
-        notify(player, locale('success.refund_to_cash', config.bailPrice), 'success')
+    if not bail[citizenid] then
+        notify(player, locale('error.no_rental'), 'error')
+        return false
     end
+
+    local rental = rentals[citizenid]
+    if rental and rental.spawning then return false end
+
+    local vehicle = rental and rental.netId and NetworkGetEntityFromNetworkId(rental.netId)
+    if vehicle and DoesEntityExist(vehicle) then
+        if #(GetEntityCoords(vehicle) - sharedConfig.locations.vehicle.coords) > returnRange then
+            notify(player, locale('error.vehicle_too_far'), 'error')
+            return false
+        end
+
+        DeleteEntity(vehicle)
+    end
+
+    player.Functions.AddMoney('cash', bail[citizenid], 'trucker-bail-paid')
+    bail[citizenid] = nil
+    rentals[citizenid] = nil
+    locations[source] = nil
+
+    notify(player, locale('success.refund_to_cash', config.bailPrice), 'success')
+    return true
 end)
 
 RegisterNetEvent('qbx_truckerjob:server:doBail', function(veh)
@@ -67,7 +91,7 @@ RegisterNetEvent('qbx_truckerjob:server:doBail', function(veh)
 
     local citizenid = player.PlayerData.citizenid
     if not clientConfig.vehicles[veh] or bail[citizenid] then return end
-    if not isNear(source, sharedConfig.locations.vehicle.coords, 8.0) then return end
+    if not isNear(source, depot, depotRange) then return end
 
     local now = GetGameTimer()
     if antiAbuse[citizenid] and now - antiAbuse[citizenid] < config.spawnBreakTime then
@@ -100,7 +124,7 @@ RegisterNetEvent('qbx_truckerjob:server:getPaid', function()
     if not player then return end
 
     local citizenid = player.PlayerData.citizenid
-    if not isNear(source, sharedConfig.locations.main.coords, 8.0) then return end
+    if not isNear(source, depot, depotRange) then return end
 
     local playerDrops = drops[citizenid] or 0
 
@@ -139,7 +163,7 @@ lib.callback.register('qbx_truckerjob:server:spawnVehicle', function(source, mod
     local citizenid = player.PlayerData.citizenid
     local rental = rentals[citizenid]
     if not rental or rental.spawned or rental.spawning or model ~= rental.model then return end
-    if not isNear(source, sharedConfig.locations.vehicle.coords, 8.0) then return end
+    if not isNear(source, depot, depotRange) then return end
 
     local vehicleLocation = sharedConfig.locations.vehicle
 

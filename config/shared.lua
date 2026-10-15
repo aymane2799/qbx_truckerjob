@@ -1,5 +1,13 @@
 return {
     locations = {
+        -- Atlas fork: the dispatcher of the depot. Renting a van, returning it, and the paycheck are the
+        -- options of this ped (ox_target). The server measures the player's distance to it.
+        -- z is the ground: one below the height of the old "main" marker.
+        ped = {
+            model = 's_m_m_trucker_01',
+            coords = vec4(153.0, -3211.68, 4.91, 274.5),
+            scenario = 'WORLD_HUMAN_CLIPBOARD',
+        },
         main = {
             label = 'Truck Shed',
             coords = vec3(153, -3211.68, 5.91),
